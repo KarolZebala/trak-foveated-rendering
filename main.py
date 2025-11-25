@@ -1,92 +1,99 @@
 import argparse
 import json
-import math
+from tkinter import Image
 import numpy as np
+from objects import Scene, Camera, Vector, Material, Sphere, Plane, Light, Ray
+from PIL import Image
 
 
-class Vector:
-    def __init__(self, x, y, z):
-        self.x = x
-        self.y = y
-        self.z = z
+class Raytracer:
+    def __init__(self, scene: Scene, width: float, height: float):
+        self.height = height
+        self.width = width
+        self.scene = scene
 
-    def __add__(self, other):
-        return Vector(self.x + other.x, self.y + other.y, self.z + other.z)
+    def render(self, ray_per_pixel: float) -> np.ndarray:
+        image = np.zeros((self.height, self.width, 3), dtype=np.float32)
 
-    def __sub__(self, other):
-        return Vector(self.x - other.x, self.y - other.y, self.z - other.z)
+        camera = self.scene.camera
 
-    def __mul__(self, scalar: float):
-        return Vector(self.x * scalar, self.y * scalar, self.z * scalar)
+        view_height = 2 * np.tan(np.radians(camera.fov / 2))
+        wiew_width = view_height * camera.aspect_ratio
 
-    def __truediv__(self, scalar: float):
-        return Vector(self.x / scalar, self.y / scalar, self.z / scalar)
+        for y in range(self.height):
+            for x in range(self.width):
+                color = Vector(0, 0, 0)
 
-    def dot(self, other):
-        return self.x * other.x + self.y * other.y + self.z * other.z
+                for _ in range(ray_per_pixel):
+                    u = (2 * (x + np.random.random()) / self.width -1) * wiew_width / 2
+                    v = (1 - 2 * (y + np.random.random()) / self.height) * view_height / 2
 
-    def cross(self, other):
-        return Vector(
-            self.y * other.z - self.z * other.y,
-            self.z * other.x - self.x * other.z,
-            self.x * other.y - self.y * other.x
-        )
+                    direction = (
+                        camera.forward +
+                        camera.right * u +
+                        camera.up * v
+                    ).normalize()
 
-    def length(self):
-        return math.sqrt(self.x * self.x + self.y * self.y + self.z * self.z)
+                    ray = Ray(camera.position, direction)
 
-    def normalize(self):
-        l = self.length()
-        if l > 0:
-            return self / l
-        return self
+                    color = color + self.trace_ray(ray)
 
-    def to_array(self):
-        return np.array([self.x, self.y, self.z])
+                color = color / ray_per_pixel
 
+                r = min(1, max(0, color.x)) ** (1/2.2)
+                g = min(1, max(0, color.y)) ** (1/2.2)
+                b = min(1, max(0, color.z)) ** (1/2.2)
 
-class Camera:
-    def __init__(self, position: Vector, look_at: Vector, up: Vector, fov: float, aspect_ratio: float):
-        self.aspect_ratio = aspect_ratio
-        self.fov = fov
-        self.up = up
-        self.position = position
-        self.look_at = look_at
+                image[y][x] = [r, g, b]
 
-        self.forward = (look_at - position).normalize()
+        return image
 
-class Light:
-    def __init__(self, position: Vector, intensity: float):
-        self.position = position
-        self.intensity = intensity
+    def trace_ray(self, ray: Ray, depth: int = 0, max_depth: int = 3) -> Vector:
+        if depth > max_depth:
+            return self.scene.background_color
 
-class Material:
-    def __init__(self, color: Vector, ambient: float = 0.1, diffuse: float=0.8, specular: float=0.2, shininess: float=32, reflectivity: float=0.0):
-        self.reflectivity = reflectivity
-        self.shininess = shininess
-        self.specular = specular
-        self.diffuse = diffuse
-        self.ambient = ambient
-        self.color = color
+        hit = self.scene.intersect(ray)
 
-class Sphere:
-    def __init__(self, center: Vector, radius: float, material: Material):
-        self.material = material
-        self.radius = radius
-        self.center = center
+        if not hit:
+            return self.scene.background_color
 
-class Plane:
-    def __init__(self, point: Vector, normal: Vector, material: Material):
-        self.normal = normal
-        self.point = point
-        self.material = material
+        color = Vector(0, 0, 0)
 
-class Scene:
-    def __init__(self):
-        self.objects = []
-        self.lights = []
-        self.camera = None
-        self.background_color = Vector(0.1, 0.1, 0.1)
+        ambient = hit.material.color * hit.material.ambient
+        color = color + ambient
+
+        for light in self.scene.lights:
+            light_dir = (light.position - hit.point).normalize()
+
+            shadow_ray = Ray(hit.point, light_dir)
+            shadow_hit = self.scene.intersect(shadow_ray)
+
+            if shadow_hit:
+                light_distance = (light.position - hit.point).length()
+                if shadow_hit.distance < light_distance:
+                    continue
+
+            diff = max(0, hit.normal.dot(light_dir))
+            diffuse = hit.material.color * hit.material.diffuse * diff * light.intensity
+            color = color + diffuse
+
+            view_dir = (self.scene.camera.position - hit.point).normalize()
+            reflect_dir = self.reflect(light_dir * -1, hit.normal)
+            spec = max(0, view_dir.dot(reflect_dir)) ** hit.material.shininess
+            specular = Vector(1, 1, 1) * hit.material.specular * spec * light.intensity
+            color = color + specular
+
+        if hit.material.reflectivity > 0 and depth < max_depth:
+            reflect_dir = self.reflect(ray.direction, hit.normal)
+            reflect_ray = Ray(hit.point, reflect_dir)
+            reflect_color = self.trace_ray(reflect_ray, depth + 1, max_depth)
+            color = color * (1 - hit.material.reflectivity) + reflect_color * hit.material.reflectivity
+
+        return color
+
+    def reflect(self, direction: Vector, normal: Vector) -> Vector:
+        return direction - normal * (2 * direction.dot(normal))
+
 
 def load_scene(path: str) -> Scene:
     with open(path, "r") as f:
@@ -96,11 +103,11 @@ def load_scene(path: str) -> Scene:
 
     camera = data["camera"]
     scene.camera = Camera(
-        position=Vector(**data["position"]),
-        look_at=Vector(**data["look_at"]),
-        up=Vector(**data["up"]),
-        fov=data["fov"],
-        aspect_ratio=data["aspect_ratio"]
+        position=Vector(**camera["position"]),
+        look_at=Vector(**camera["look_at"]),
+        up=Vector(**camera["up"]),
+        fov=camera["fov"],
+        aspect_ratio=camera["aspect_ratio"]
     )
 
     for obj in data.get("objects", []):
@@ -148,23 +155,32 @@ def load_scene(path: str) -> Scene:
         scene.lights.append(light)
 
     if 'background_color' in data:
-        background_color = Vector(**data['background_color'])
+        scene.background_color = Vector(**data['background_color'])
 
     return scene
-
 
 def main():
     parser = argparse.ArgumentParser()
 
     parser.add_argument('--scene', type=str, help='Plik ze sceną w formacie JSON')
     parser.add_argument('--output', type=str, help='Ścieżka do pliku wyjściowego')
-    parser.add_argument('width', default=800, help='Szerokość')
-    parser.add_argument('height', default=600, help='Wysokość')
-    parser.add_argumemt('--rays', default=10, help='Liczba promieni na piksel')
+    parser.add_argument('--width', type=int, default=800, help='Szerokość')
+    parser.add_argument('--height', type=int, default=600, help='Wysokość')
+    parser.add_argument('--rays', type=int, default=4, help='Liczba promieni na piksel')
 
     args = parser.parse_args()
 
     scene = load_scene(args.scene)
 
+    raytracer = Raytracer(scene, args.width, args.height)
+
+    image = raytracer.render(ray_per_pixel=args.rays)
+
+    image_unit8 = (image * 255).astype(np.uint8)
+    Image.fromarray(image_unit8).save(args.output)
+
+
 if __name__ == '__main__':
     main()
+
+    #python main.py --scene scene.json --output obraz.png --width 800 --height 450 --rays 4
