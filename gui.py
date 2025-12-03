@@ -57,7 +57,6 @@ def run_gui():
             messagebox.showerror("Error", "Please provide scene and output paths.")
             return
 
-        # Construct arguments list
         args = [
             '--scene', scene,
             '--output', output,
