@@ -2,7 +2,7 @@ import argparse
 import json
 import math
 import numpy as np
-from objects import Scene, Camera, Vector, Material, Sphere, Plane, Light, Ray
+from objects import Scene, Camera, Vector, Material, Sphere, Plane, Light, Ray, Box, Cone
 from PIL import Image
 
 class Raytracer:
@@ -20,11 +20,11 @@ class Raytracer:
 
         # Pobieramy środek fovea w pikselach
         fx, fy = fovea_center
-        
+
         # Parametry obszarów (w pikselach)
         # Promień pełnej ostrości (np. 20% szerokości ekranu)
         min_dim = min(self.width, self.height)
-        radius_inner = min_dim * 0.20 
+        radius_inner = min_dim * 0.20
         # Promień, gdzie zaczyna się pełne rozmycie (np. 60% szerokości)
         radius_outer = min_dim * 0.60
 
@@ -37,12 +37,12 @@ class Raytracer:
 
             for x in range(self.width):
                 color = Vector(0, 0, 0)
-                
+
                 # Obliczamy odległość aktualnego piksela od środka fovea
                 dx = x - fx
                 dy = y - fy
                 dist = math.sqrt(dx*dx + dy*dy)
-                
+
                 # Obliczamy współczynnik ostrości (1.0 = ostry, 0.0 = rozmyty)
                 if dist < radius_inner:
                     sharpness = 1.0
@@ -54,7 +54,7 @@ class Raytracer:
                     sharpness = 1.0 - t
 
                 # --- Optymalizacja i Efekt Foveated Rendering ---
-                
+
                 # 1. Redukcja liczby promieni (Variable Rate Shading)
                 # W centrum pełna liczba promieni, na obrzeżach schodzimy do 1
                 current_rays = max(1, int(ray_per_pixel * sharpness))
@@ -66,11 +66,11 @@ class Raytracer:
                 blur_factor = (1.0 - sharpness) * 4.0 # Siła rozmycia
 
                 for _ in range(current_rays):
-                    # Losowe przesunięcie wewnątrz piksela (antyaliasing) 
+                    # Losowe przesunięcie wewnątrz piksela (antyaliasing)
                     # powiększone o czynnik rozmycia na peryferiach
                     jitter_x = (np.random.random() - 0.5)
                     jitter_y = (np.random.random() - 0.5)
-                    
+
                     # Modyfikujemy pozycję próbkowania
                     offset_x = x + 0.5 + jitter_x * (1 + blur_factor * 5.0)
                     offset_y = y + 0.5 + jitter_y * (1 + blur_factor * 5.0)
@@ -119,14 +119,14 @@ class Raytracer:
             # Cienie
             shadow_ray = Ray(hit.point, light_dir)
             shadow_hit = self.scene.intersect(shadow_ray)
-            
+
             in_shadow = False
             if shadow_hit:
                 light_distance = (light.position - hit.point).length()
                 # Mały bias, aby uniknąć "shadow acne"
                 if shadow_hit.distance < light_distance - 0.001:
                     in_shadow = True
-            
+
             if in_shadow:
                 continue
 
@@ -190,6 +190,19 @@ def load_scene(path: str) -> Scene:
             scene.objects.append(Plane(
                 point=Vector(**obj['point']),
                 normal=Vector(**obj['normal']),
+                material=material
+            ))
+        elif obj["type"] == "box":
+            scene.objects.append(Box(
+                min_point=Vector(**obj['min_point']),
+                max_point=Vector(**obj['max_point']),
+                material=material
+            ))
+        elif obj["type"] == "cone":
+            scene.objects.append(Cone(
+                center=Vector(**obj['center']),
+                radius=obj['radius'],
+                height=obj['height'],
                 material=material
             ))
 
