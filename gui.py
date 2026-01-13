@@ -1,4 +1,5 @@
 import tkinter as tk
+import time
 from tkinter import filedialog, messagebox
 import scene_loader
 
@@ -92,8 +93,11 @@ def run_gui():
 
         try:
             # Uruchomienie renderowania
+            start_time = time.time()
             scene_loader.main(args)
-            messagebox.showinfo("Success", "Rendering finished!")
+            end_time = time.time()
+            render_time = end_time - start_time
+            messagebox.showinfo("Success", f"Rendering finished! \n Render time: {render_time:.2f} seconds.")
         except Exception as e:
             messagebox.showerror("Error", f"An error occurred: {e}")
             print(e) # Wypisz błąd w konsoli
